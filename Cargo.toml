@@ -1,0 +1,12 @@
+[package]
+name = "gg18-etude"
+version = "0.1.0"
+authors = ["Daisuke Kanda <dai1975@gmail.com>"]
+
+[dependencies]
+lazy_static = { version="1.2.0" }
+serde = { version="1.0.87" }
+serde_json = { version="1.0.38" }
+serde_derive = { version="1.0.87" }
+paillier = { version="0.2" }
+secp256k1 = { version="0.12.2" }
