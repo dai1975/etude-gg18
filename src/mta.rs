@@ -1,24 +1,14 @@
 extern crate paillier;
 use paillier::*;
-use paillier::arithimpl::traits::Samplable;
 use ::std::borrow::Cow;
-use std::ops::Shr;
+use ::field;
 
-lazy_static! {
-   static ref ORDER:BigInt = BigInt::from_str_radix("fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141", 16).unwrap();
-   static ref HALF_ORDER:BigInt = ORDER.clone().shr(1);
-}
-fn random_bigint() -> BigInt {
-   BigInt::sample_range(&HALF_ORDER, &ORDER)
-   //BigInt::sample_range(&BigInt::from(10), &BigInt::from(20))
-}
-
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Enc {
    ek: EncryptionKey,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Dec {
    enc: Enc,
    dk: DecryptionKey,
@@ -40,7 +30,7 @@ impl Enc {
       Paillier::add(&self.ek, a, b)
    }
    pub fn mul<'c1,'c2, 'd>(&self, a:RawCiphertext<'c1>, b:&BigInt) -> RawCiphertext<'d> {
-      Paillier::mul(&self.ek, a, RawPlaintext(Cow::Borrowed(b))
+      Paillier::mul(&self.ek, a, RawPlaintext(Cow::Borrowed(b)))
    }
 }
 
@@ -63,96 +53,150 @@ impl Dec {
 }
 
 #[derive(Debug)]
-pub struct Alice<'a> {
-   dec: &'a Dec,
-   m: &'a BigInt,
+pub struct Alice {
+   dec: Dec,
+   m: BigInt,
    a: BigInt,
 }
 #[derive(Debug)]
-pub struct Bob<'a> {
-   enc: &'a Enc,
-   m: &'a BigInt,
+pub struct Bob {
+   m: BigInt,
    a: BigInt,
 }
 
-impl <'a> Alice<'a> {
-   pub fn new(dec: &'a Dec, m:&'a BigInt) -> Self {
+impl Alice {
+   pub fn new(m:BigInt) -> Alice {
       Self {
-         dec: dec,
+         dec: Dec::new(),
          m: m,
          a: BigInt::from(0),
       }
    }
-   pub fn to_bob(&self) -> RawCiphertext {
-      self.dec.encrypt(&self.m)
+
+   pub fn to_bob(&self) -> (&Enc, RawCiphertext) {
+      (&self.dec.enc, self.dec.encrypt(&self.m))
    }
    pub fn from_bob<'c>(&mut self, data:RawCiphertext<'c>) {
       self.a = self.dec.decrypt(data);
    }
 }
 
-impl <'a> Bob<'a> {
-   pub fn new(enc: &'a Enc, m:&'a BigInt) -> Self {
+impl Bob {
+   pub fn new(m:BigInt) -> Self {
       Self {
-         enc: enc,
          m: m,
          a: BigInt::from(0),
       }
    }
-   pub fn from_alice<'c, 'd>(&mut self, data:RawCiphertext<'c>) -> RawCiphertext<'d> {
-      let beta = random_bigint();
 
-      let b = self.enc.encrypt(&beta);
-      let r = self.enc.add(self.enc.mul(data, self.m), b);
+   pub fn from_alice<'c, 'd>(&mut self, enc: Enc, data:RawCiphertext<'c>) -> RawCiphertext<'d> {
+      let beta = field::random_bigint();
+
+      let b = enc.encrypt(&beta);
+      let r = enc.add(enc.mul(data, &self.m), b);
 
       self.a = -beta;
       r
    }
 }
 
+enum Role {
+   Init(),
+   A(Alice),
+   B(Bob),
+}
+impl Role {
+   pub fn as_alice_mut(&mut self) -> &mut Alice {
+      if let Role::A(ref mut r) = self {
+         return r
+      } else {
+         panic!("not a Alice");
+      }
+   }
+   pub fn as_alice(&self) -> &Alice {
+      if let Role::A(ref r) = self {
+         return r
+      } else {
+         panic!("not a Alice");
+      }
+   }
+   pub fn as_bob_mut(&mut self) -> &mut Bob {
+      if let Role::B(ref mut r) = self {
+         return r
+      } else {
+         panic!("not a Bob");
+      }
+   }
+   pub fn as_bob(&self) -> &Bob {
+      if let Role::B(ref r) = self {
+         return r
+      } else {
+         panic!("not a Bob");
+      }
+   }
+}
 
 pub struct Player {
-   dec: Dec,
    m: BigInt,
+   role: Role,
 }
 impl Player {
    pub fn new() -> Self {
-      Self { dec: Dec::new(), m:random_bigint() }
+      Self {
+         m: field::random_bigint(),
+         role: Role::Init(),
+      }
    }
-   pub fn get_enc(&self) -> &Enc { &self.dec.enc }
    pub fn get_secret(&self) -> &BigInt { &self.m }
 
-   pub fn alicization(&self) -> Alice {
-      Alice::new(&self.dec, &self.m)
+   pub fn as_alice(&self) -> &Alice { self.role.as_alice() }
+   pub fn as_bob(&self) -> &Bob { self.role.as_bob() }
+
+   pub fn alicization(&mut self) -> &mut Alice {
+      self.role = Role::A(Alice::new(self.m.clone()));
+      self.role.as_alice_mut()
    }
-   pub fn bobization<'a>(&'a self, alice:&'a Player) -> Bob {
-      Bob::new(alice.get_enc(), &self.m)
+   pub fn bobization(&mut self) -> &mut Bob {
+      self.role = Role::B(Bob::new(self.m.clone()));
+      self.role.as_bob_mut()
    }
 }
 
 
 #[cfg(test)]
 mod tests {
+   extern crate paillier;
+   use paillier::*;
+   use ::mta::*;
+
+   impl Alice {
+      #[inline] pub fn m(&self) -> &BigInt { &self.m }
+      #[inline] pub fn a(&self) -> &BigInt { &self.a }
+   }
+   impl Bob {
+      #[inline] pub fn m(&self) -> &BigInt { &self.m }
+      #[inline] pub fn a(&self) -> &BigInt { &self.a }
+   }
+
    #[test]
-   fn test() {
-      use ::mta::*;
-      let p1 = Player::new();
-      let p2 = Player::new();
-      let mut alice = p1.alicization();
-      let mut bob = p2.bobization(&p1);
+   fn test_mta() {
+      let mut p1 = Player::new();
+      let mut p2 = Player::new();
+      let alice = p1.alicization();
+      let bob = p2.bobization();
 
       let x2 = {
-         let x1 = alice.to_bob();
-         let x2 = bob.from_alice(x1.clone());
+         let (e,x1) = alice.to_bob();
+         let x2 = bob.from_alice(e.clone(), x1.clone());
          x2
       };
       alice.from_bob(x2);
 
-      assert_eq!(alice.m * bob.m, &alice.a + &bob.a);
+      assert_eq!(&alice.m * &bob.m, &alice.a + &bob.a);
 
-      println!("alice.m = {:?}", alice.m);
-      println!("bob.m = {:?}", bob.m);
-      println!("mul = {:?}", alice.m * bob.m);
+      println!("alice.m = {:?}", &alice.m);
+      println!("bob.m = {:?}", &bob.m);
+      println!("mul = {:?}", &alice.m * &bob.m);
 
       println!("alice.a = {:?}", &alice.a);
       println!("alice.a = {:?}", &bob.a);
