@@ -194,6 +194,7 @@ mod tests {
 
       assert_eq!(&alice.m * &bob.m, &alice.a + &bob.a);
 
+      /*
       println!("alice.m = {:?}", &alice.m);
       println!("bob.m = {:?}", &bob.m);
       println!("mul = {:?}", &alice.m * &bob.m);
@@ -201,5 +202,6 @@ mod tests {
       println!("alice.a = {:?}", &alice.a);
       println!("alice.a = {:?}", &bob.a);
       println!("add = {:?}", &alice.a + &bob.a);
+       */
    }
 }

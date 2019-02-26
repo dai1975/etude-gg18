@@ -5,6 +5,7 @@ use std::convert::From;
 extern crate secp256k1;
 use self::secp256k1::{Secp256k1, SecretKey};
 use self::secp256k1::constants::{SECRET_KEY_SIZE};
+use self::secp256k1::key::{ONE_KEY};
 //rand 0.4
 use self::secp256k1::rand::{Rng};
 use self::secp256k1::rand::os::{OsRng};
@@ -33,8 +34,8 @@ impl Player {
       Self {
          i: i,
          ui: SecretKey::new(rng),
-         ki: SecretKey::from_slice(&[0; SECRET_KEY_SIZE]).expect("ki"),
-         ri: SecretKey::from_slice(&[0; SECRET_KEY_SIZE]).expect("ri"),
+         ki: ONE_KEY,
+         ri: ONE_KEY,
          mta_kr: Vec::new(),
          mta_ku: Vec::new(),
       }

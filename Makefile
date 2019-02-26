@@ -2,4 +2,7 @@ all:
 	cargo build
 
 test:
-	cargo test -- --nocapture
+	RUST_BACKTRACE=0 cargo test -- --nocapture
+
+test1:
+	RUST_BACKTRACE=1 cargo test -- --nocapture
