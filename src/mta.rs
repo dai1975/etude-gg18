@@ -3,6 +3,8 @@ use paillier::*;
 use ::std::borrow::Cow;
 use ::field;
 
+pub use paillier::RawCiphertext;
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Enc {
    ek: EncryptionKey,
@@ -55,13 +57,15 @@ impl Dec {
 #[derive(Debug)]
 pub struct Alice {
    dec: Dec,
-   m: BigInt,
-   a: BigInt,
+   pub m: BigInt,
+   pub a: BigInt,
+   pub fin: bool,
 }
 #[derive(Debug)]
 pub struct Bob {
-   m: BigInt,
-   a: BigInt,
+   pub m: BigInt,
+   pub a: BigInt,
+   pub fin: bool,
 }
 
 impl Alice {
@@ -70,14 +74,16 @@ impl Alice {
          dec: Dec::new(),
          m: m,
          a: BigInt::from(0),
+         fin: false,
       }
    }
 
    pub fn to_bob(&self) -> (&Enc, RawCiphertext) {
       (&self.dec.enc, self.dec.encrypt(&self.m))
    }
-   pub fn from_bob<'c>(&mut self, data:RawCiphertext<'c>) {
-      self.a = self.dec.decrypt(data);
+   pub fn from_bob<'c>(&mut self, data:&RawCiphertext<'c>) {
+      self.a = self.dec.decrypt(data.clone());
+      self.fin = true;
    }
 }
 
@@ -86,16 +92,18 @@ impl Bob {
       Self {
          m: m,
          a: BigInt::from(0),
+         fin: false,
       }
    }
 
-   pub fn from_alice<'c, 'd>(&mut self, enc: Enc, data:RawCiphertext<'c>) -> RawCiphertext<'d> {
+   pub fn from_alice<'c, 'd>(&mut self, enc:&Enc, data:&RawCiphertext<'c>) -> RawCiphertext<'d> {
       let beta = field::random_bigint();
 
       let b = enc.encrypt(&beta);
-      let r = enc.add(enc.mul(data, &self.m), b);
+      let r = enc.add(enc.mul(data.clone(), &self.m), b);
 
       self.a = -beta;
+      self.fin = true;
       r
    }
 }
@@ -113,22 +121,8 @@ impl Role {
          panic!("not a Alice");
       }
    }
-   pub fn as_alice(&self) -> &Alice {
-      if let Role::A(ref r) = self {
-         return r
-      } else {
-         panic!("not a Alice");
-      }
-   }
    pub fn as_bob_mut(&mut self) -> &mut Bob {
       if let Role::B(ref mut r) = self {
-         return r
-      } else {
-         panic!("not a Bob");
-      }
-   }
-   pub fn as_bob(&self) -> &Bob {
-      if let Role::B(ref r) = self {
          return r
       } else {
          panic!("not a Bob");
@@ -149,8 +143,16 @@ impl Player {
    }
    pub fn get_secret(&self) -> &BigInt { &self.m }
 
-   pub fn as_alice(&self) -> &Alice { self.role.as_alice() }
-   pub fn as_bob(&self) -> &Bob { self.role.as_bob() }
+   pub fn as_alice(&mut self) -> &mut Alice { self.role.as_alice_mut() }
+   pub fn as_bob(&mut self) -> &mut Bob { self.role.as_bob_mut() }
+
+   pub fn get_result(&self) -> Option<(&BigInt,&BigInt)> {
+      match &self.role {
+         Role::A(alice) if alice.fin == true => Some((&alice.m, &alice.a)),
+         Role::B(bob) if bob.fin == true => Some((&bob.m, &bob.a)),
+         _ => None,
+      }
+   }
 
    pub fn alicization(&mut self) -> &mut Alice {
       self.role = Role::A(Alice::new(self.m.clone()));
@@ -187,10 +189,10 @@ mod tests {
 
       let x2 = {
          let (e,x1) = alice.to_bob();
-         let x2 = bob.from_alice(e.clone(), x1.clone());
+         let x2 = bob.from_alice(e, &x1);
          x2
       };
-      alice.from_bob(x2);
+      alice.from_bob(&x2);
 
       assert_eq!(&alice.m * &bob.m, &alice.a + &bob.a);
 

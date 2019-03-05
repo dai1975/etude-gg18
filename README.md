@@ -4,7 +4,7 @@
 R. Gennaro and S. Goldfeder. Fast Multiparty Threshold ECDSA with Fast Trustless Setup. In ACM CCS 2018.
 
 4.1 Key generation protocol
-Phase 1. Each Player Pi selects ui. Pi send g^ui to Pj(i!=j) by trapdoor.
+Phase 1. Each Player Pi selects ui. Pi send g^ui to Pj(i!=j) by using commitment schema.
 Phase 2. All Players perform Join-Feldman VSS together.
 Phase 3. ZK-prove.
 
@@ -25,7 +25,7 @@ At the end of the KeyGen,
 Phase 0. Convert (t,n) share xi to (t',t') share of wi
 Phase 1. Each player `Pi` selects `ki`,`γ i`
          Define `k = Σ ki, γ =Σ γ i`
-         Each player broadcast g^γ i by using trapdoor protocol.
+         Each player broadcast g^γ i by using commitment scheme.
 Phase 2.
  2-a. Every pair of Pi and Pj performs MtA against `ki` and `γ j` then get `α i` and `β j`.
       Note that `ki * γ j = α ij + β ij`.
