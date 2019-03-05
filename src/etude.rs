@@ -31,8 +31,12 @@ struct Player {
    ri: Option<SecretKey>,
    gri: Option<PublicKey>,
    grs: Vec<PublicKey>,
-   kr: Vec<(Mpz,Mpz)>, //mul, add
-   ku: Vec<(Mpz,Mpz)>,
+
+   kri: Option<Mpz>,
+   kui: Option<Mpz>,
+
+   sign_rx: Option<Mpz>,
+   sign_si: Option<Mpz>,
 
    state: PlayerState,
 }
@@ -44,9 +48,14 @@ enum PlayerState {
    },
    Mta {
       kr: Vec<mta::Player>,
+      rk: Vec<mta::Player>,
       ku: Vec<mta::Player>,
+      uk: Vec<mta::Player>,
    },
    BroadcastingDelta {
+      deltas: Vec<Option<Mpz>>,
+   },
+   BroadcastingSign {
    },
 }
 
@@ -57,6 +66,7 @@ impl Player {
          PlayerState::BroadcastingGr { .. } => "BroadcastingGr",
          PlayerState::Mta { .. } => "Mta",
          PlayerState::BroadcastingDelta { .. } => "BroadcastingDelta",
+         PlayerState::BroadcastingSign { .. } => "BroadcastingSign",
       }
    }
 
@@ -70,8 +80,10 @@ impl Player {
          ri: None,
          gri: None,
          grs: Vec::new(),
-         kr: Vec::<(Mpz,Mpz)>::new(),
-         ku: Vec::<(Mpz,Mpz)>::new(),
+         kri: None,
+         kui: None,
+         sign_rx: None,
+         sign_si: None,
          state: PlayerState::Void { },
       }
    }
@@ -91,7 +103,7 @@ impl Player {
       }
    }
 
-   pub fn on_gr(&mut self, i:usize, gr:PublicKey) {
+   pub fn on_gri(&mut self, i:usize, gr:PublicKey) {
       if let PlayerState::BroadcastingGr { ref mut grs } = self.state {
          grs[i] = Some(gr);
          if grs.iter().find(|o|o.is_none()).is_some() {
@@ -101,21 +113,34 @@ impl Player {
       } else {
          panic!("invalid state");
       }
+      let ki = seckey_to_mpz(&self.ki.unwrap());
+      let ri = seckey_to_mpz(&self.ri.unwrap());
+      let ui = seckey_to_mpz(&self.ui.unwrap());
       self.state = PlayerState::Mta {
-         kr: (0..self.n).map(|_| mta::Player::new()).collect(),
-         ku: (0..self.n).map(|_| mta::Player::new()).collect(),
+         kr: (0..self.n).map(|_| mta::Player::new_with(ki.clone())).collect(),
+         rk: (0..self.n).map(|_| mta::Player::new_with(ri.clone())).collect(),
+         ku: (0..self.n).map(|_| mta::Player::new_with(ki.clone())).collect(),
+         uk: (0..self.n).map(|_| mta::Player::new_with(ui.clone())).collect(),
       };
    }
 
    pub fn on_mta_1(&mut self, from:usize) -> Vec<(mta::Enc, mta::RawCiphertext)> {
-      let mut vec = Vec::<(mta::Enc, mta::RawCiphertext)>::with_capacity(2);
-      if let PlayerState::Mta { kr, ku } = &mut self.state {
+      let mut vec = Vec::<(mta::Enc, mta::RawCiphertext)>::with_capacity(4);
+      if let PlayerState::Mta { kr, rk, ku, uk } = &mut self.state {
          {
             let (e,c) = kr[from].alicization().to_bob();;
             vec.push((e.clone(), c));
          }
          {
+            let (e,c) = rk[from].alicization().to_bob();;
+            vec.push((e.clone(), c));
+         }
+         {
             let (e,c) = ku[from].alicization().to_bob();;
+            vec.push((e.clone(), c));
+         }
+         {
+            let (e,c) = uk[from].alicization().to_bob();;
             vec.push((e.clone(), c));
          }
 
@@ -126,16 +151,26 @@ impl Player {
    }
 
    pub fn on_mta_2(&mut self, from:usize, inp:Vec<(mta::Enc, mta::RawCiphertext)>) -> Vec<mta::RawCiphertext> {
-      let mut vec = Vec::<mta::RawCiphertext>::with_capacity(2);
-      if let PlayerState::Mta { kr, ku } = &mut self.state {
+      let mut vec = Vec::<mta::RawCiphertext>::with_capacity(4);
+      if let PlayerState::Mta { kr, rk, ku, uk } = &mut self.state {
          {
             let bob = kr[from].bobization();
             let c = bob.from_alice(&inp[0].0, &inp[0].1);
             vec.push(c);
          }
          {
-            let bob = ku[from].bobization();
+            let bob = rk[from].bobization();
             let c = bob.from_alice(&inp[1].0, &inp[1].1);
+            vec.push(c);
+         }
+         {
+            let bob = ku[from].bobization();
+            let c = bob.from_alice(&inp[2].0, &inp[2].1);
+            vec.push(c);
+         }
+         {
+            let bob = uk[from].bobization();
+            let c = bob.from_alice(&inp[3].0, &inp[3].1);
             vec.push(c);
          }
       } else {
@@ -145,14 +180,22 @@ impl Player {
       vec
    }
    pub fn on_mta_3(&mut self, from:usize, inp:Vec<mta::RawCiphertext>) {
-      if let PlayerState::Mta { kr, ku } = &mut self.state {
+      if let PlayerState::Mta { kr, rk, ku, uk } = &mut self.state {
          {
             let alice = kr[from].as_alice();
             alice.from_bob(&inp[0]);
          }
          {
-            let alice = ku[from].as_alice();
+            let alice = rk[from].as_alice();
             alice.from_bob(&inp[1]);
+         }
+         {
+            let alice = ku[from].as_alice();
+            alice.from_bob(&inp[2]);
+         }
+         {
+            let alice = uk[from].as_alice();
+            alice.from_bob(&inp[3]);
          }
       } else {
          panic!("invalid state");
@@ -160,16 +203,55 @@ impl Player {
       self.check_mta_fin();
    }
    fn check_mta_fin(&mut self,) {
-      let mut new_kr: Vec<(Mpz,Mpz)> = Vec::with_capacity(self.n);
-      let mut new_ku: Vec<(Mpz,Mpz)> = Vec::with_capacity(self.n);
-      if let PlayerState::Mta { kr, ku } = &mut self.state {
+      let mut kr_a: Vec<Mpz> = Vec::with_capacity(self.n);
+      let mut rk_a: Vec<Mpz> = Vec::with_capacity(self.n);
+      let mut ku_a: Vec<Mpz> = Vec::with_capacity(self.n);
+      let mut uk_a: Vec<Mpz> = Vec::with_capacity(self.n);
+      let mut kri = Mpz::new();
+      let mut kui = Mpz::new();
+      if let PlayerState::Mta { kr, rk, ku, uk } = &mut self.state {
          for i in 0..(self.n) {
-            if (i == self.i) {
-               new_kr.push((Mpz::new(), Mpz::new()));
-               new_ku.push((Mpz::new(), Mpz::new()));
-            } else if let (Some(rkr), Some(rku)) = (kr[i].get_result(), ku[i].get_result()) {
-               new_kr.push((rkr.0.clone(), rkr.1.clone()));
-               new_ku.push((rku.0.clone(), rku.1.clone()));
+            if i == self.i {
+               kr_a.push(Mpz::new());
+               rk_a.push(Mpz::new());
+               ku_a.push(Mpz::new());
+               uk_a.push(Mpz::new());
+               kri += &kr[i].m * &rk[i].m;
+               kui += &ku[i].m * &uk[i].m;
+            } else {
+               let rkr = kr[i].get_result();
+               let rrk = rk[i].get_result();
+               let rku = ku[i].get_result();
+               let ruk = uk[i].get_result();
+               if let (Some(rkr), Some(rrk), Some(rku), Some(ruk)) = (rkr, rrk, rku, ruk) {
+                  kr_a.push(rkr.1.clone());
+                  rk_a.push(rrk.1.clone());
+                  ku_a.push(rku.1.clone());
+                  uk_a.push(ruk.1.clone());
+                  kri += rkr.1 * rrk.1;
+                  kui += rku.1 * ruk.1;
+               } else {
+                  return;
+               }
+            }
+         }
+      } else {
+         panic!("invalid state");
+      }
+      let mut deltas:Vec<Option<Mpz>> = vec![None; self.n];
+      deltas[self.i] = Some(kri.clone());
+      self.kri = Some(kri);
+      self.kui = Some(kui);
+      self.state = PlayerState::BroadcastingDelta { deltas: deltas }
+   }
+
+   pub fn on_delta_i(&mut self, i:usize, di:Mpz) {
+      let mut delta = Mpz::new();
+      if let PlayerState::BroadcastingDelta { ref mut deltas } = self.state {
+         deltas[i] = Some(di);
+         for i in 0..(self.n) {
+            if let Some(ref d) = deltas[i] {
+               delta += d;
             } else {
                return;
             }
@@ -177,9 +259,14 @@ impl Player {
       } else {
          panic!("invalid state");
       }
-      self.kr = new_kr;
-      self.ku = new_ku;
-      self.state = PlayerState::BroadcastingDelta { };
+
+      /*
+      R = (Π g^γ i)^(1/δ ) // = g^(1/k)
+      r = H(R)
+      si = m*ki + r*σ i
+       */
+      self.state = PlayerState::BroadcastingSign {
+      };
    }
 }
 
@@ -215,7 +302,7 @@ impl Etude {
 
    pub fn sign(&mut self) {
       self.phase1_begin();
-      self.phase2_broadcast_gr();
+      self.phase1_broadcast_gr();
    }
 
    fn phase1_begin(&mut self) {
@@ -224,18 +311,18 @@ impl Etude {
          p.begin(&mut rng);
       });
    }
-   fn phase2_broadcast_gr(&mut self) {
+   fn phase1_broadcast_gr(&mut self) {
       for i in 0..(self.n) {
          for j in 0..(self.n) {
             if i != j {
                let gri = self.players[i].gri.unwrap().clone();
-               self.players[j].on_gr(i, gri);
+               self.players[j].on_gri(i, gri);
             }
          }
       }
    }
 
-   fn phase3_exchange_mta(&mut self) {
+   fn phase2_exchange_mta(&mut self) {
       for i in 0..(self.n-1) {
          let (left,right) = self.players.as_mut_slice().split_at_mut(i+1);
          let mut pi = &mut left[i];
@@ -249,6 +336,18 @@ impl Etude {
          }
       }
    }
+
+   fn phase3_broadcast_delta(&mut self) {
+      for i in 0..(self.n) {
+         for j in 0..(self.n) {
+            if i != j {
+               let kri = self.players[i].kri.clone().unwrap();
+               self.players[j].on_delta_i(i, kri);
+            }
+         }
+      }
+   }
+
 }
 
 
@@ -262,25 +361,10 @@ mod tests {
       gg18.phase1_begin();
       gg18.players.iter().for_each(|p| assert_eq!(p.get_state_name(), "BroadcastingGr"));
 
-      gg18.phase2_broadcast_gr();
+      gg18.phase1_broadcast_gr();
       gg18.players.iter().for_each(|p| assert_eq!(p.get_state_name(), "Mta"));
 
-      gg18.phase3_exchange_mta();
+      gg18.phase2_exchange_mta();
       gg18.players.iter().for_each(|p| assert_eq!(p.get_state_name(), "BroadcastingDelta"));
-
-      let n = gg18.n;
-      for i in 0..n {
-         for j in 0..n {
-            if i != j {
-               let akr = &gg18.players[i].kr[j];
-               let bkr = &gg18.players[j].kr[i];
-               assert_eq!(&akr.0 * &bkr.0, &akr.1 + &bkr.1);
-
-               let aku = &gg18.players[i].ku[j];
-               let bku = &gg18.players[j].ku[i];
-               assert_eq!(&aku.0 * &bku.0, &aku.1 + &bku.1);
-            }
-         }
-      }
    }
 }

@@ -131,13 +131,19 @@ impl Role {
 }
 
 pub struct Player {
-   m: BigInt,
+   pub m: BigInt,
    role: Role,
 }
 impl Player {
    pub fn new() -> Self {
       Self {
          m: field::random_bigint(),
+         role: Role::Init(),
+      }
+   }
+   pub fn new_with(m:BigInt) -> Self {
+      Self {
+         m: m,
          role: Role::Init(),
       }
    }

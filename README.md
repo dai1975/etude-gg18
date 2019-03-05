@@ -34,7 +34,7 @@ Phase 2.
  2-b. MtA agains `ki` and `wi` then get `μ ij` and `ν ij`
       As is 2-a, Pi compute `σ i = ki*wi + Σ j!=i(μ ij + ν ji)`, note `k*x = Σ σ i`
 
-Phase 3. `Pi` broadcast `δ i` and all players are compute δ  = Σ δ i = k*γ
+Phase 3. Each player `Pi` broadcasts `δ i` and all players are compute δ  = Σ δ i = k*γ
 
 Phase 4. Each player `Pi` opens `g^γ i` and compute `R = (Π g^γ i)^(1/δ ) = g^(1/k)` and `r = H(R)`
 
