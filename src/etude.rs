@@ -1,42 +1,40 @@
 extern crate gmp;
 use self::gmp::mpz::Mpz;
-use std::convert::From;
 
-extern crate secp256k1;
-use self::secp256k1::{Secp256k1, SecretKey, PublicKey};
-use self::secp256k1::constants::{SECRET_KEY_SIZE};
-//use self::secp256k1::key::{ONE_KEY};
-//rand 0.4
-use self::secp256k1::rand::{Rng};
-use self::secp256k1::rand::os::{OsRng};
+extern crate curv;
+use self::curv::{FE,GE,SK,PK,BigInt};
+use self::curv::elliptic::curves::traits::{ECScalar, ECPoint};
 
 use ::mta;
 
-fn seckey_to_mpz(sk: &SecretKey) -> Mpz {
-   let a:&[u8] = unsafe { std::slice::from_raw_parts(sk.as_ptr(), SECRET_KEY_SIZE) };
-   Mpz::from(a)
+fn fe_to_mpz(fe:&FE) -> Mpz {
+   let tmp = fe.to_big_int().clone().to_str_radix(10);
+   let ret = Mpz::from_str_radix(&tmp, 10).unwrap();
+   ret
 }
-fn seckey_from_mpz<T>(z: &Mpz) -> SecretKey {
-   let v = Vec::<u8>::from(z);
-   SecretKey::from_slice(v.as_slice()).unwrap()
+fn fe_from_mpz(z:&Mpz) -> FE {
+   let tmp = z.to_str_radix(10);
+   let fe_z = BigInt::from_str_radix(&tmp, 10).unwrap();
+   let ret = <FE as ECScalar<SK>>::from(&fe_z);
+   ret
 }
 
 struct Player {
    pub n: usize,
    pub i: usize,
-   pub ctx: Secp256k1<secp256k1::All>,
 
-   ui: Option<SecretKey>,
-   ki: Option<SecretKey>,
-   ri: Option<SecretKey>,
-   gri: Option<PublicKey>,
-   grs: Vec<PublicKey>,
+   pub g: GE,
+   ui: Option<FE>,
+   ki: Option<FE>,
+   ri: Option<FE>,
+   gri: Option<GE>,
+   grs: Vec<GE>,
 
-   kri: Option<Mpz>,
-   kui: Option<Mpz>,
+   kri: Option<FE>,
+   kui: Option<FE>,
 
-   sign_rx: Option<Mpz>,
-   sign_si: Option<Mpz>,
+   sign_r: Option<GE>,
+   sign_si: Option<FE>,
 
    state: PlayerState,
 }
@@ -44,7 +42,7 @@ struct Player {
 enum PlayerState {
    Void { },
    BroadcastingGr {
-      grs: Vec<Option<PublicKey>>,
+      grs: Vec<Option<GE>>,
    },
    Mta {
       kr: Vec<mta::Player>,
@@ -72,9 +70,9 @@ impl Player {
 
    pub fn new(i:usize, n:usize) -> Self {
       Player {
+         g: GE::generator(),
          n: n,
          i: i,
-         ctx: Secp256k1::new(),
          ui: None,
          ki: None,
          ri: None,
@@ -82,20 +80,20 @@ impl Player {
          grs: Vec::new(),
          kri: None,
          kui: None,
-         sign_rx: None,
+         sign_r: None,
          sign_si: None,
          state: PlayerState::Void { },
       }
    }
 
-   pub fn begin<RNG:Rng>(&mut self, rng:&mut RNG) {
+   pub fn begin(&mut self) {
       if let PlayerState::Void { } = self.state {
          let n = self.n;
-         self.ui = Some(SecretKey::new(rng));
-         self.ki = Some(SecretKey::new(rng));
-         self.ri = Some(SecretKey::new(rng));
-         self.gri = Some(PublicKey::from_secret_key(&self.ctx, &self.ri.unwrap()));
-         let mut grs:Vec<Option<PublicKey>> = vec![None; n];
+         self.ui = Some(FE::new_random());
+         self.ki = Some(FE::new_random());
+         self.ri = Some(FE::new_random());
+         self.gri = Some(self.g.clone() * &self.ri.unwrap());
+         let mut grs:Vec<Option<GE>> = vec![None; n];
          grs[self.i] = self.gri.clone();
          self.state = PlayerState::BroadcastingGr { grs: grs };
       } else {
@@ -103,7 +101,7 @@ impl Player {
       }
    }
 
-   pub fn on_gri(&mut self, i:usize, gr:PublicKey) {
+   pub fn on_gri(&mut self, i:usize, gr:GE) {
       if let PlayerState::BroadcastingGr { ref mut grs } = self.state {
          grs[i] = Some(gr);
          if grs.iter().find(|o|o.is_none()).is_some() {
@@ -113,9 +111,9 @@ impl Player {
       } else {
          panic!("invalid state");
       }
-      let ki = seckey_to_mpz(&self.ki.unwrap());
-      let ri = seckey_to_mpz(&self.ri.unwrap());
-      let ui = seckey_to_mpz(&self.ui.unwrap());
+      let ki = fe_to_mpz(&self.ki.unwrap());
+      let ri = fe_to_mpz(&self.ri.unwrap());
+      let ui = fe_to_mpz(&self.ui.unwrap());
       self.state = PlayerState::Mta {
          kr: (0..self.n).map(|_| mta::Player::new_with(ki.clone())).collect(),
          rk: (0..self.n).map(|_| mta::Player::new_with(ri.clone())).collect(),
@@ -203,19 +201,11 @@ impl Player {
       self.check_mta_fin();
    }
    fn check_mta_fin(&mut self,) {
-      let mut kr_a: Vec<Mpz> = Vec::with_capacity(self.n);
-      let mut rk_a: Vec<Mpz> = Vec::with_capacity(self.n);
-      let mut ku_a: Vec<Mpz> = Vec::with_capacity(self.n);
-      let mut uk_a: Vec<Mpz> = Vec::with_capacity(self.n);
       let mut kri = Mpz::new();
       let mut kui = Mpz::new();
       if let PlayerState::Mta { kr, rk, ku, uk } = &mut self.state {
          for i in 0..(self.n) {
             if i == self.i {
-               kr_a.push(Mpz::new());
-               rk_a.push(Mpz::new());
-               ku_a.push(Mpz::new());
-               uk_a.push(Mpz::new());
                kri += &kr[i].m * &rk[i].m;
                kui += &ku[i].m * &uk[i].m;
             } else {
@@ -224,10 +214,6 @@ impl Player {
                let rku = ku[i].get_result();
                let ruk = uk[i].get_result();
                if let (Some(rkr), Some(rrk), Some(rku), Some(ruk)) = (rkr, rrk, rku, ruk) {
-                  kr_a.push(rkr.1.clone());
-                  rk_a.push(rrk.1.clone());
-                  ku_a.push(rku.1.clone());
-                  uk_a.push(ruk.1.clone());
                   kri += rkr.1 * rrk.1;
                   kui += rku.1 * ruk.1;
                } else {
@@ -240,8 +226,8 @@ impl Player {
       }
       let mut deltas:Vec<Option<Mpz>> = vec![None; self.n];
       deltas[self.i] = Some(kri.clone());
-      self.kri = Some(kri);
-      self.kui = Some(kui);
+      self.kri = Some(fe_from_mpz(&kri));
+      self.kui = Some(fe_from_mpz(&kui));
       self.state = PlayerState::BroadcastingDelta { deltas: deltas }
    }
 
@@ -306,9 +292,8 @@ impl Etude {
    }
 
    fn phase1_begin(&mut self) {
-      let mut rng = OsRng::new().expect("OsRng");
       self.players.iter_mut().for_each(|p| {
-         p.begin(&mut rng);
+         p.begin();
       });
    }
    fn phase1_broadcast_gr(&mut self) {
@@ -342,7 +327,7 @@ impl Etude {
          for j in 0..(self.n) {
             if i != j {
                let kri = self.players[i].kri.clone().unwrap();
-               self.players[j].on_delta_i(i, kri);
+               self.players[j].on_delta_i(i, fe_to_mpz(&kri));
             }
          }
       }
