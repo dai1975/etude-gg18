@@ -130,11 +130,11 @@ impl Role {
    }
 }
 
-pub struct Player {
+pub struct Party {
    pub m: BigInt,
    role: Role,
 }
-impl Player {
+impl Party {
    pub fn new() -> Self {
       Self {
          m: field::random_bigint(),
@@ -188,19 +188,31 @@ mod tests {
 
    #[test]
    fn test_mta() {
-      let mut p1 = Player::new();
-      let mut p2 = Player::new();
-      let alice = p1.alicization();
-      let bob = p2.bobization();
+      let mut p1 = Party::new();
+      let mut p2 = Party::new();
 
-      let x2 = {
-         let (e,x1) = alice.to_bob();
-         let x2 = bob.from_alice(e, &x1);
-         x2
+      let (alice, bob) = {
+         let alice = p1.alicization();
+         let bob = p2.bobization();
+
+         let x2 = {
+            let (e,x1) = alice.to_bob();
+            let x2 = bob.from_alice(e, &x1);
+            x2
+         };
+         alice.from_bob(&x2);
+
+         assert_eq!(&alice.m * &bob.m, &alice.a + &bob.a);
+         ( (alice.m.clone(), alice.a.clone()), (bob.m.clone(), bob.a.clone()) )
       };
-      alice.from_bob(&x2);
 
-      assert_eq!(&alice.m * &bob.m, &alice.a + &bob.a);
+      let a = p1.get_result().clone().unwrap();
+      let b = p2.get_result().clone().unwrap();
+
+      assert_eq!(&alice.0, a.0);
+      assert_eq!(&alice.1, a.1);
+      assert_eq!(&bob.0, b.0);
+      assert_eq!(&bob.1, b.1);
 
       /*
       println!("alice.m = {:?}", &alice.m);

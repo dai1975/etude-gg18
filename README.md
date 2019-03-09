@@ -42,6 +42,11 @@ Phase 5. Each player `Pi` compute `si = m*ki + r*σ i`
          Note that `Σ si = mΣ ki + rΣ σ  = mk + rkx = k(m+xr) = s`
 
 
+Verify:
+  1. Each Player broadcast `g^wi` and calc `y = Π g^wi = g^(Σ wi) = g^x`
+  2. Test `g^(m/s) + y * (r/s) = R`
+     Note that `g^(m/s) + y ^ (r/s) = g^(m/s) + g^(x * (r/s)) = g^((m+rx)/s) = g^(1/k) = R`
+
 # software design of this etude
 
 To the protocol be simple, I start followint conditions:
