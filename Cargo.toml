@@ -4,18 +4,21 @@ version = "0.1.0"
 authors = ["Daisuke Kanda <dai1975@gmail.com>"]
 
 [features]
+debug = []
 
 [dependencies]
-lazy_static = { version="1.2.0" }
+rand = "0.7"
+#lazy_static = { version="1.2.0" }
+rust-gmp = { version="0.5" }
 serde = { version="1.0.87" }
 serde_json = { version="1.0.38" }
 serde_derive = { version="1.0.87" }
-rust-gmp = { version="0.5" }
 
-[dependencies.paillier]
-git = "https://github.com/KZen-networks/rust-paillier"
+paillier = { git = "https://github.com/KZen-networks/rust-paillier" }
 
 [dependencies.curv]
 git = "https://github.com/KZen-networks/curv"
 features = ["ec_secp256k1"]
+
+[dev-dependencies]
 
